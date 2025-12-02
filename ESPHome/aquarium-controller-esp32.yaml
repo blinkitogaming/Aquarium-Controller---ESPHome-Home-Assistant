@@ -1,0 +1,557 @@
+esphome:
+  name: aquarium-controller-esp32
+  friendly_name: aquarium_controller_esp32
+  includes:
+    - irrigation.h
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# Enable logging
+logger:
+  level: DEBUG
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret ha_api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Aquarium-Controller-Esp32"
+    password: "DoTeVcd7sDKQ"
+
+captive_portal:
+
+<<: !include common/logger.yaml
+
+globals:
+  # ============================================================================= #
+  # Irrigation time remaining
+  - id: remaining_time1
+    type: int
+    restore_value: no
+    initial_value: "300"
+  - id: remaining_time2
+    type: int
+    restore_value: no
+    initial_value: "300"
+  - id: remaining_time3
+    type: int
+    restore_value: no
+    initial_value: "300"
+  - id: remaining_time4
+    type: int
+    restore_value: no
+    initial_value: "300"
+
+  # ============================================================================= #
+  # Store previous values to verify change.
+  - id: remaining_time1_previous
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: remaining_time2_previous
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: remaining_time3_previous
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: remaining_time4_previous
+    type: int
+    restore_value: no
+    initial_value: "0"
+
+# Common housekeeping components.
+#output:
+#  <<: !include common/outputs/status_led_esp32.yaml
+
+#light:
+#  <<: !include common/lights/status_led.yaml
+
+
+binary_sensor:
+  - !include common/binary_sensors/status.yaml
+
+  # ============================================================================= #
+  # Buttons along the left side of the unit (R1, R2, R3, R4).
+#  - platform: gpio
+#    id: key1
+#    pin:
+#      number: $button1_gpio
+#      mode: INPUT_PULLUP
+#      inverted: True
+#    filters:
+#      - delayed_on: 100ms
+#      - delayed_off: 100ms
+#    on_click:
+#      min_length: 50ms
+#      max_length: 350ms
+#      then:
+#        - switch.toggle: irrigation_zone1
+
+#  - platform: gpio
+#    id: key2
+#    pin:
+#      number: $button2_gpio
+#      mode: INPUT_PULLUP
+#      inverted: True
+#    filters:
+#      - delayed_on: 100ms
+#      - delayed_off: 100ms
+#    on_click:
+#      min_length: 50ms
+#      max_length: 350ms
+#      then:
+#        - switch.toggle: irrigation_zone2
+
+switch:
+  #- !include common/switches/restart.yaml
+
+  # ============================================================================= #
+  # Virtual Zone Switches which toggle the relay, and store the current state.
+  - platform: template
+    name: Primer cambio
+    id: irrigation_zone1
+    icon: mdi:pipe-valve
+    lambda: return id(relay1).state;
+    optimistic: true
+    turn_on_action:
+      # Turn on if not disabled.
+      if:
+        condition:
+          lambda: return id(irrigation_zone1_duration) > 0;
+        then:
+          - switch.turn_on: relay1
+    turn_off_action:
+      - switch.turn_off: relay1
+
+#  - platform: template
+#    name: Irrigation Zone2
+#    id: irrigation_zone2
+#    icon: mdi:pipe-valve
+#    lambda: return id(relay2).state;
+#    optimistic: true
+#    turn_on_action:
+      # Turn on if not disabled.
+#      if:
+#        condition:
+#          lambda: return id(irrigation_zone2_duration) > 0;
+#        then:
+#          - switch.turn_on: relay2
+#    turn_off_action:
+#      - switch.turn_off: relay2
+
+  # ============================================================================= #
+  # Relays which trigger solenoids
+  - platform: gpio
+    id: relay1
+    pin: GPIO26
+    restore_mode: ALWAYS_OFF
+    on_turn_on:
+      then:
+        # Start the countdown timer.
+        - globals.set:
+            id: remaining_time1
+            value: !lambda return id(irrigation_zone1_duration).state * 60;
+        # Show the remaining time.
+        - sensor.template.publish:
+            id: irrigation_zone1_remaining
+            state: !lambda return id(irrigation_zone1_duration).state;
+        # Show the "Next Time" as "now".
+        - text_sensor.template.publish:
+            id: irrigation_zone1_next
+            state: "ahora"
+            # state NOW on original code, change to your preferred language
+    on_turn_off:
+      then:
+        - sensor.template.publish:
+            id: irrigation_zone1_remaining
+            state: "0"
+        # Update the next scheduled run time.
+        - text_sensor.template.publish:
+            id: irrigation_zone1_next
+            state: !lambda |-
+              return update_next_runtime(id(irrigation_zone1_times).state, id(irrigation_zone1_days).state);
+
+#  - platform: gpio
+#    id: relay2
+#    pin: $relay2_gpio
+#    restore_mode: ALWAYS_OFF
+#    on_turn_on:
+#      then:
+        # Start the countdown timer.
+#        - globals.set:
+#            id: remaining_time2
+#            value: !lambda return id(irrigation_zone2_duration).state * 60;
+        # Show the remaining time.
+#        - sensor.template.publish:
+#            id: irrigation_zone2_remaining
+#            state: !lambda return id(irrigation_zone2_duration).state;
+        # Show the "Next Time" as "now".
+#        - text_sensor.template.publish:
+#            id: irrigation_zone2_next
+#            state: "ahora"
+#    on_turn_off:
+#      then:
+#        - sensor.template.publish:
+#            id: irrigation_zone2_remaining
+#            state: "0"
+        # Update the next scheduled run time.
+#        - text_sensor.template.publish:
+#            id: irrigation_zone2_next
+#            state: !lambda |-
+#              return update_next_runtime(id(irrigation_zone2_times).state, id(irrigation_zone2_days).state);
+
+###### EXTERNAL COMPONENTS - FIX FOR DALLAS TEMPERATURE DS18B20######
+external_components:
+  - source:
+      type: git
+      url: https://github.com/ssieb/esphome
+      ref: onewire
+    components: [ gpio ]
+    refresh: 1min
+
+###### DALLAS TEMPERATURE DS18B20 ######
+one_wire:
+  - platform: gpio
+    pin: 4
+
+sensor:
+  - !include common/sensors/uptime.yaml
+  - !include common/sensors/wifi_signal.yaml
+  - platform: dallas_temp
+    address: 0x793ce10457491d28
+    name: 'Sensor temperatura acuario'
+    id: sensor_temperatura_acuario
+    filters:
+      - median:
+          window_size: 7
+          send_every: 4
+          send_first_at: 3
+  
+  - platform: pulse_counter
+    pin: GPIO33
+    unit_of_measurement: 'L/h'
+    accuracy_decimals: 2
+    update_interval: 1s
+    name: 'Caudal'
+    filters:
+    - lambda: return (x  / 450) * 60;  
+    
+    total:
+      unit_of_measurement: 'L'
+      name: 'Litros acumulados'
+      accuracy_decimals: 2
+      filters:
+      - lambda: return (x / 450.0);
+
+  - platform: adc
+    pin: A0
+    id: ph
+    name: "pH sensor"
+    update_interval: 1s
+    unit_of_measurement: pH
+    accuracy_decimals: 1
+    attenuation: auto
+    # https://esphome.io/components/sensor/index.html#sensor-filters
+    filters:
+      - sliding_window_moving_average:
+          window_size: 900
+          send_every: 600
+          send_first_at: 15
+      # Measured voltage -> Actual pH (buffer solution)
+      - calibrate_linear:
+          - 1.72 -> 6.86
+          - 2.04 -> 4.01
+
+  # ============================================================================= #
+  # Retrieve durations settings from the Home Assistant UI.
+  - platform: homeassistant
+    id: ui_zone1_duration
+    entity_id: input_number.irrigation_zone1_duration
+    on_value:
+      #if:
+      #  condition:
+      #    api.connected:
+      then:
+        - sensor.template.publish:
+            id: irrigation_zone1_duration
+            state: !lambda return id(ui_zone1_duration).state;
+
+#  - platform: homeassistant
+#    id: ui_zone2_duration
+#    entity_id: input_number.irrigation_zone2_duration
+#    on_value:
+      #if:
+      #  condition:
+      #    api.connected:
+#      then:
+#      - sensor.template.publish:
+#          id: irrigation_zone2_duration
+#          state: !lambda return id(ui_zone2_duration).state;
+
+  # ============================================================================= #
+  # Store durations.
+  - platform: template
+    name: Duración cambio 1
+    id: irrigation_zone1_duration
+    accuracy_decimals: 0
+    unit_of_measurement: min
+    icon: mdi:camera-timer
+
+#  - platform: template
+#    name: Duración cambio 2
+#    id: irrigation_zone2_duration
+#    accuracy_decimals: 0
+#    unit_of_measurement: min
+#    icon: mdi:camera-timer
+
+  # ============================================================================= #
+  # Countdown sensors.
+  - platform: template
+    name: Tiempo restante primer cambio
+    id: irrigation_zone1_remaining
+    lambda: "return 0;"
+    accuracy_decimals: 0
+    unit_of_measurement: min
+    icon: mdi:timer
+    on_value:
+      then:
+        - if:
+            condition:
+              lambda: return id(remaining_time1) == 0;
+            then:
+              - switch.turn_off: relay1
+
+#  - platform: template
+#    name: Tiempo restante segundo cambio
+#    id: irrigation_zone2_remaining
+#    lambda: "return 0;"
+#    accuracy_decimals: 0
+#    unit_of_measurement: min
+#    icon: mdi:timer
+#    on_value:
+#      then:
+#        - if:
+#            condition:
+#              lambda: return id(remaining_time2) == 0;
+#            then:
+#              - switch.turn_off: relay2
+
+text_sensor:
+  # ============================================================================= #
+  # Retrieve list of times from the Home Assistant UI.
+  - platform: homeassistant
+    id: ui_zone1_times
+    entity_id: input_select.irrigation_zone1_times
+    on_value:
+      #if:
+      #  condition:
+      #    api.connected:
+      then:
+        #- delay: 10sec
+        - text_sensor.template.publish:
+            id: irrigation_zone1_times
+            state: !lambda return id(ui_zone1_times).state;
+
+#  - platform: homeassistant
+#    id: ui_zone2_times
+#    entity_id: input_text.irrigation_zone2_times
+#    on_value:
+      #if:
+      #  condition:
+      #    api.connected:
+#      then:
+        #- delay: 10sec
+#        - text_sensor.template.publish:
+#            id: irrigation_zone2_times
+#            state: !lambda return id(ui_zone2_times).state;
+
+  # ============================================================================= #
+  # Store time lists.
+  - platform: template
+    name: Horario primer cambio
+    id: irrigation_zone1_times
+    on_value:
+      then:
+        # Update the next scheduled run time.
+        - text_sensor.template.publish:
+            id: irrigation_zone1_next
+            state: !lambda |-
+              return update_next_runtime(id(irrigation_zone1_times).state, id(irrigation_zone1_days).state);
+
+#  - platform: template
+#    name: Horario segundo cambio
+#    id: irrigation_zone2_times
+#    on_value:
+#      then:
+        # Update the next scheduled run time.
+#        - text_sensor.template.publish:
+#            id: irrigation_zone2_next
+#            state: !lambda |-
+#              return update_next_runtime(id(irrigation_zone2_times).state, id(irrigation_zone2_days).state);
+
+# ============================================================================= #
+  # Retrieve list of days from the Home Assistant UI.
+  - platform: homeassistant
+    id: ui_zone1_days
+    entity_id: input_select.irrigation_zone1_days
+    on_value:
+      #if:
+      #  condition:
+      #    api.connected:
+      then:
+        #- delay: 10sec
+        - text_sensor.template.publish:
+            id: irrigation_zone1_days
+            state: !lambda return id(ui_zone1_days).state;
+
+#  - platform: homeassistant
+#    id: ui_zone2_days
+#    entity_id: input_text.irrigation_zone2_days
+#    on_value:
+      #if:
+      #  condition:
+      #    api.connected:
+#      then:
+        #- delay: 10sec
+#        - text_sensor.template.publish:
+#            id: irrigation_zone2_days
+#            state: !lambda return id(ui_zone2_days).state;
+
+  # ============================================================================= #
+  # Store time lists.
+  - platform: template
+    name: Días primer cambio
+    id: irrigation_zone1_days
+    on_value:
+      then:
+        # Update the next scheduled run time.
+        - text_sensor.template.publish:
+            id: irrigation_zone1_next
+            state: !lambda |-
+              return update_next_runtime(id(irrigation_zone1_times).state, id(irrigation_zone1_days).state);
+
+#  - platform: template
+#    name: Días segundo cambio
+#    id: irrigation_zone2_days
+#    on_value:
+#      then:
+        # Update the next scheduled run time.
+#        - text_sensor.template.publish:
+#            id: irrigation_zone2_next
+#            state: !lambda |-
+#              return update_next_runtime(id(irrigation_zone2_times).state, id(irrigation_zone2_days).state);
+
+  # ============================================================================= #
+  # Set the next scheduled time.
+  - platform: template
+    name: Siguiente cambio
+    id: irrigation_zone1_next
+    icon: mdi:calendar-clock
+
+#  - platform: template
+#    name: Siguiente cambio 2
+#    id: irrigation_zone2_next
+#    icon: mdi:calendar-clock
+
+# Update the countdown timers every 5 seconds.
+interval:
+  - interval: 5s
+    then:
+      - lambda: |-
+          if (id(remaining_time1) > 0) {
+            // Store the previous time.
+            id(remaining_time1_previous) = id(remaining_time1);
+            // When the relay is on.
+            if (id(relay1).state) {
+              // Decrement the timer.
+              id(remaining_time1) -= 5;
+              // Turn off the relay when the time reaches zero... or the remaining time fails a sanity check!
+              //if (id(remaining_time1) <= 0 || id(irrigation_zone1_remaining).state > id(irrigation_zone1_duration).state){
+              if (id(remaining_time1) <= 0) {
+                id(relay1).turn_off();
+                id(remaining_time1) = 0;
+              }
+            }
+            // Update the remaining time display.
+            if (id(remaining_time1_previous) != id(remaining_time1)) {
+              id(irrigation_zone1_remaining).publish_state( (id(remaining_time1)/60) + 1 );
+            }
+          }
+
+#          if (id(remaining_time2) > 0) {
+#            id(remaining_time2_previous) = id(remaining_time2);
+#            if (id(relay2).state) {
+#              id(remaining_time2) -= 5;
+#              if (id(remaining_time2) <= 0) {
+#                id(relay2).turn_off();
+#                id(remaining_time2) = 0;
+#              }
+#            }
+#            if (id(remaining_time2_previous) != id(remaining_time2)) {
+#              id(irrigation_zone2_remaining).publish_state( (id(remaining_time2)/60) + 1 );
+#            }
+#          }
+
+# Time based automations.
+time:
+  - platform: homeassistant
+    id: homeassistant_time
+    timezone: Europe/Madrid
+    on_time:
+      - seconds: 0
+        minutes: /1
+        then:
+          - lambda: |-
+              if (scheduled_runtime(id(irrigation_zone1_next).state.c_str())) {
+                id(irrigation_zone1).turn_on();
+              }
+#              if (scheduled_runtime(id(irrigation_zone2_next).state.c_str())) {
+#                id(irrigation_zone2).turn_on();
+#              }
+
+###### OLED DISPLAY SSH1106 128x64 ######
+i2c:
+  sda: GPIO21
+  scl: GPIO18
+  frequency: 400kHz
+
+font:
+  - file: "fonts/Roboto/Roboto-Regular.ttf"
+    id: roboto_regular
+    size: 16
+
+display:
+  - platform: ssd1306_i2c
+    model: "SH1106 128x64"
+    address: 0x3C
+    lambda:  |-
+      it.printf(0, 10, id(roboto_regular), "Temp: %.1fc", id(sensor_temperatura_acuario).state);
+      it.printf(0, 40, id(roboto_regular), "pH: %.1f", id(ph).state);
+
+###### LIGHTS ######
+light:
+  - platform: monochromatic
+    output: canal_blanco
+    name: "Pantalla acuario - canal blanco"
+    restore_mode: RESTORE_DEFAULT_OFF
+
+output:
+  - platform: ledc
+    pin: GPIO32
+    id: canal_blanco
+    frequency: 1220Hz
