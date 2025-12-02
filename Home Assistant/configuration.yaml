@@ -1,0 +1,23 @@
+# AÑADE LO SIGUIENTE A TU ARCHIVO configuration.yaml EXISTENTE
+
+###### AQUARIUM CONTROLLER ######
+input_text:
+  ##HORAS
+  irrigation_zone1_times:
+    name: Horarios 1
+    icon: mdi:chart-timeline
+
+  ##DIAS
+  irrigation_zone1_days:
+    name: Dias Zona 1
+    icon: mdi:calendar-week
+
+input_number:
+  ##DURACION
+  irrigation_zone1_duration:
+    name: Duración Zona 1
+    min: 0
+    max: 30
+    step: 1
+    mode: slider
+    icon: mdi:timer
